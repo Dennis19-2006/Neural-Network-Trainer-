@@ -2,6 +2,12 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import time
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle, FancyArrowPatch
+from matplotlib.animation import FuncAnimation
+import io
+from interpreter_bot import InterpreterBot, create_interpreter_bot
 
 # -----------------------------
 # Neural network logic (yours)
@@ -108,6 +114,515 @@ except:
     y_sample = (X_sample[:, 0] + X_sample[:, 1] > 0).astype(int)
     sample_data = pd.DataFrame(np.column_stack([X_sample, y_sample]), columns=["Feature1", "Feature2", "Target"])
 
+# Initialize interpreter bot
+if "interpreter_bot" not in st.session_state:
+    st.session_state["interpreter_bot"] = create_interpreter_bot()
+
+# =====================================================================
+# NEURAL NETWORK VISUALIZATION WITH ANIMATIONS
+# =====================================================================
+def visualize_network_interactive(model, X_sample, prediction_output, num_features, hidden_neurons):
+    """Create interactive neural network visualization with glowing neurons and optimal path"""
+    
+    # Get activations for the sample
+    Z_hidden = np.dot(X_sample.reshape(1, -1), model["W_hidden"]) + model["B_hidden"]
+    A_hidden = sigmoid(Z_hidden)[0]
+    Z_output = np.dot(A_hidden.reshape(1, -1), model["W_output"]) + model["B_output"]
+    A_output = sigmoid(Z_output)[0]
+    
+    input_vals = X_sample.flatten()
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Define positions for neurons
+    layer_heights = {
+        'input': np.linspace(0, 1, num_features),
+        'hidden': np.linspace(0, 1, hidden_neurons),
+        'output': [0.5]
+    }
+    
+    # Input neurons
+    for i, val in enumerate(input_vals):
+        activation = val
+        color_intensity = int(255 * min(abs(activation), 1))
+        color = f'rgba(255, {color_intensity}, 0, 0.9)'
+        
+        fig.add_trace(go.Scatter(
+            x=[0], y=[layer_heights['input'][i]],
+            mode='markers',
+            marker=dict(size=30 + abs(activation)*10, color=color),
+            hovertemplate=f"<b>Input {i}</b><br>Value: {activation:.4f}<extra></extra>",
+            name=f"Input {i}",
+            showlegend=False
+        ))
+    
+    # Hidden neurons
+    max_hidden_activation = np.max(A_hidden) if len(A_hidden) > 0 else 1
+    for i, activation in enumerate(A_hidden):
+        color_intensity = int(255 * (activation / max(max_hidden_activation, 1)))
+        color = f'rgba({color_intensity}, 150, 255, 0.9)'
+        glow_size = 30 + activation * 20
+        
+        fig.add_trace(go.Scatter(
+            x=[1], y=[layer_heights['hidden'][i]],
+            mode='markers',
+            marker=dict(size=glow_size, color=color),
+            hovertemplate=f"<b>Hidden {i}</b><br>Activation: {activation:.4f}<extra></extra>",
+            name=f"Hidden {i}",
+            showlegend=False
+        ))
+    
+    # Output neuron
+    output_activation = A_output[0]
+    output_color_intensity = int(255 * min(output_activation, 1))
+    output_color = f'rgba({output_color_intensity}, 255, 0, 0.9)'
+    
+    fig.add_trace(go.Scatter(
+        x=[2], y=[0.5],
+        mode='markers',
+        marker=dict(size=40 + output_activation*15, color=output_color),
+        hovertemplate=f"<b>Output</b><br>Activation: {output_activation:.4f}<extra></extra>",
+        name="Output",
+        showlegend=False
+    ))
+    
+    # Find optimal path (strongest activations)
+    strongest_hidden_idx = np.argmax(A_hidden) if len(A_hidden) > 0 else 0
+    strongest_input_idx = np.argmax(np.abs(input_vals))
+    
+    # Draw connections from strongest input to strongest hidden
+    fig.add_trace(go.Scatter(
+        x=[0, 1], y=[layer_heights['input'][strongest_input_idx], layer_heights['hidden'][strongest_hidden_idx]],
+        mode='lines',
+        line=dict(color='rgba(255, 255, 0, 0.6)', width=4, dash='solid'),
+        hovertemplate="<b>Optimal Path (Input→Hidden)</b><extra></extra>",
+        name="Optimal Path",
+        showlegend=False
+    ))
+    
+    # Draw connection from strongest hidden to output
+    fig.add_trace(go.Scatter(
+        x=[1, 2], y=[layer_heights['hidden'][strongest_hidden_idx], 0.5],
+        mode='lines',
+        line=dict(color='rgba(255, 255, 0, 0.6)', width=4, dash='solid'),
+        hovertemplate="<b>Optimal Path (Hidden→Output)</b><extra></extra>",
+        name="Optimal Path",
+        showlegend=False
+    ))
+    
+    # Draw other connections with lighter styling
+    for i, input_val in enumerate(input_vals):
+        for j, hidden_activation in enumerate(A_hidden):
+            weight = model["W_hidden"][i, j]
+            weight_intensity = min(abs(weight) * 2, 1)
+            
+            fig.add_trace(go.Scatter(
+                x=[0, 1], y=[layer_heights['input'][i], layer_heights['hidden'][j]],
+                mode='lines',
+                line=dict(color=f'rgba(100, 100, 100, {weight_intensity*0.3})', width=weight_intensity),
+                hovertemplate=f"<b>Input {i} → Hidden {j}</b><br>Weight: {weight:.4f}<extra></extra>",
+                showlegend=False
+            ))
+    
+    # Hidden to output connections
+    for j, hidden_activation in enumerate(A_hidden):
+        weight = model["W_output"][j, 0]
+        weight_intensity = min(abs(weight) * 2, 1)
+        
+        fig.add_trace(go.Scatter(
+            x=[1, 2], y=[layer_heights['hidden'][j], 0.5],
+            mode='lines',
+            line=dict(color=f'rgba(100, 100, 100, {weight_intensity*0.3})', width=weight_intensity),
+            hovertemplate=f"<b>Hidden {j} → Output</b><br>Weight: {weight:.4f}<extra></extra>",
+            showlegend=False
+        ))
+    
+    # Update layout
+    fig.update_layout(
+        title=f"🧠 Neural Network Flow (Prediction: {prediction_output:.4f})",
+        showlegend=False,
+        hovermode='closest',
+        margin=dict(b=20, l=5, r=5, t=40),
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            range=[-0.3, 2.3]
+        ),
+        yaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            range=[-0.2, 1.2]
+        ),
+        plot_bgcolor='rgba(240, 240, 240, 0.5)',
+        width=900,
+        height=600
+    )
+    
+    # Add layer labels
+    fig.add_annotation(text="INPUT LAYER", x=-0.15, y=1.1, showarrow=False, font=dict(size=12, color='black'))
+    fig.add_annotation(text="HIDDEN LAYER", x=1, y=1.1, showarrow=False, font=dict(size=12, color='black'))
+    fig.add_annotation(text="OUTPUT", x=2, y=1.1, showarrow=False, font=dict(size=12, color='black'))
+    
+    return fig
+
+def create_animated_training_neurons(model, X, Y):
+    """Create animation showing neuron activations during prediction"""
+    
+    # Get a few sample predictions to animate
+    num_samples = min(5, len(X))
+    
+    fig, axes = plt.subplots(1, num_samples, figsize=(15, 4))
+    if num_samples == 1:
+        axes = [axes]
+    
+    for sample_idx in range(num_samples):
+        x = X[sample_idx:sample_idx+1]
+        
+        # Forward pass
+        Z_hidden = np.dot(x, model["W_hidden"]) + model["B_hidden"]
+        A_hidden = sigmoid(Z_hidden)[0]
+        Z_output = np.dot(A_hidden.reshape(1, -1), model["W_output"]) + model["B_output"]
+        A_output = sigmoid(Z_output)[0, 0]
+        
+        ax = axes[sample_idx]
+        
+        # Create simple visualization
+        num_inputs = x.shape[1]
+        num_hidden = len(A_hidden)
+        
+        y_pos_input = np.linspace(0.8, 0.2, num_inputs)
+        y_pos_hidden = np.linspace(0.8, 0.2, num_hidden)
+        
+        # Plot input neurons
+        for i, val in enumerate(x[0]):
+            color_val = min(abs(val), 1)
+            ax.scatter(0.1, y_pos_input[i], s=500, c=[[color_val, 0.5, 1-color_val]], 
+                      edgecolors='black', linewidth=2, zorder=3)
+            ax.text(0.05, y_pos_input[i], f"{val:.2f}", ha='right', va='center', fontsize=8)
+        
+        # Plot hidden neurons with glow effect
+        max_hidden = np.max(A_hidden) if len(A_hidden) > 0 else 1
+        for i, activation in enumerate(A_hidden):
+            # Glow effect
+            glow_alpha = activation * 0.3
+            circle = Circle((0.5, y_pos_hidden[i]), 0.08, 
+                           color=(activation, 0.3, 1-activation), alpha=glow_alpha, zorder=1)
+            ax.add_patch(circle)
+            
+            # Main neuron
+            ax.scatter(0.5, y_pos_hidden[i], s=400, 
+                      c=[[activation, 0.3, 1-activation]], 
+                      edgecolors='black', linewidth=2, zorder=3)
+            ax.text(0.5, y_pos_hidden[i], f"{activation:.2f}", 
+                   ha='center', va='center', fontsize=7, color='white', weight='bold')
+        
+        # Plot output neuron
+        ax.scatter(0.9, 0.5, s=600, c=[[A_output, 0.7, 1-A_output]], 
+                  edgecolors='gold', linewidth=3, zorder=3)
+        ax.text(0.95, 0.5, f"{A_output:.3f}", ha='left', va='center', fontsize=9, weight='bold')
+        
+        # Draw connections (optimal path stronger)
+        for i in range(num_inputs):
+            for j in range(num_hidden):
+                weight = model["W_hidden"][i, j]
+                alpha = min(abs(weight) * 0.5, 0.5)
+                ax.plot([0.15, 0.45], [y_pos_input[i], y_pos_hidden[j]], 
+                       'gray', alpha=alpha, linewidth=1, zorder=0)
+        
+        # Highlight optimal path
+        max_input_idx = np.argmax(np.abs(x[0]))
+        max_hidden_idx = np.argmax(A_hidden)
+        
+        ax.plot([0.15, 0.45], [y_pos_input[max_input_idx], y_pos_hidden[max_hidden_idx]], 
+               'yellow', linewidth=3, zorder=2)
+        ax.plot([0.55, 0.85], [y_pos_hidden[max_hidden_idx], 0.5], 
+               'yellow', linewidth=3, zorder=2)
+        
+        for j in range(num_hidden):
+            ax.plot([0.55, 0.85], [y_pos_hidden[j], 0.5], 
+                   'lightgray', alpha=0.2, linewidth=1, zorder=0)
+        
+        ax.set_xlim(-0.05, 1.0)
+        ax.set_ylim(0.1, 0.9)
+        ax.set_aspect('equal')
+        ax.axis('off')
+        ax.set_title(f"Sample {sample_idx+1}\nActual: {Y[sample_idx, 0]:.3f}", 
+                    fontsize=10, weight='bold')
+    
+    plt.tight_layout()
+    return fig
+
+# =====================================================================
+# HELPER FUNCTION: Generate Full Dataset Assessment
+# =====================================================================
+def generate_dataset_assessment(df, bot):
+    """Generate comprehensive assessment of dataset"""
+    st.markdown("---")
+    st.markdown("### 📊 Dataset Assessment Report")
+    
+    # Dataset statistics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Samples", len(df))
+    with col2:
+        st.metric("Features", len(df.columns) - 1)
+    with col3:
+        st.metric("Target Type", "Continuous" if df.iloc[:, -1].dtype in ['float64', 'float32'] else "Categorical")
+    with col4:
+        st.metric("Data Quality", f"{(1 - df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100:.1f}%")
+    
+    # Feature analysis
+    with st.expander("🔍 Feature Analysis", expanded=True):
+        feature_cols = df.columns[:-1]
+        for col in feature_cols:
+            col_data = df[col].describe()
+            st.write(f"**{col}**: μ={col_data['mean']:.4f}, σ={col_data['std']:.4f}, range=[{col_data['min']:.2f}, {col_data['max']:.2f}]")
+    
+    # Target analysis
+    with st.expander("🎯 Target Distribution", expanded=True):
+        target_col = df.columns[-1]
+        st.write(f"**{target_col} Statistics:**")
+        st.write(df[target_col].describe())
+        
+        if len(df[target_col].unique()) <= 10:
+            st.write("**Value Counts:**")
+            st.write(df[target_col].value_counts())
+    
+    st.markdown("---")
+
+# =====================================================================
+# HELPER FUNCTION: Generate Training Assessment
+# =====================================================================
+def generate_training_assessment(model, X, Y, bot):
+    """Generate comprehensive assessment after training"""
+    st.markdown("---")
+    st.markdown("### 📈 Training Assessment Report")
+    
+    # Make predictions on training data
+    predictions = predict(X, model)
+    predictions_flat = predictions.flatten()
+    Y_flat = Y.flatten()
+    
+    # Calculate detailed metrics
+    mae = np.mean(np.abs(predictions_flat - Y_flat))
+    mse = np.mean((predictions_flat - Y_flat) ** 2)
+    rmse = np.sqrt(mse)
+    
+    # Calculate true confidence metrics
+    mean_pred = np.mean(predictions_flat)
+    ss_tot = np.sum((Y_flat - mean_pred) ** 2)
+    ss_res = np.sum((Y_flat - predictions_flat) ** 2)
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+    
+    # Calculate prediction spread (how confident/concentrated)
+    pred_std = np.std(predictions_flat)
+    actual_std = np.std(Y_flat)
+    
+    # Calculate error distribution
+    errors = np.abs(predictions_flat - Y_flat)
+    error_mean = np.mean(errors)
+    error_std = np.std(errors)
+    within_1_std = np.sum(errors <= error_mean + error_std) / len(errors) * 100
+    within_2_std = np.sum(errors <= error_mean + 2*error_std) / len(errors) * 100
+    
+    # Calibration: how well predictions match actual distribution
+    calibration_error = abs(np.mean(predictions_flat) - np.mean(Y_flat))
+    
+    # Real confidence score (inverse of error)
+    confidence_score = max(0, 1 - mae)
+    confidence_pct = confidence_score * 100
+    
+    # Display confidence metrics
+    st.markdown("### 🎯 Real Confidence Assessment")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Confidence Score", f"{confidence_pct:.1f}%", "↑ Higher is better")
+    with col2:
+        st.metric("R² Score", f"{r_squared:.4f}", "↑ Closer to 1.0 is better")
+    with col3:
+        st.metric("MAE", f"{mae:.4f}", "↓ Lower is better")
+    with col4:
+        st.metric("RMSE", f"{rmse:.4f}", "↓ Lower is better")
+    
+    # Confidence interpretation
+    if confidence_pct >= 95:
+        conf_text = "🟢 **EXTREMELY HIGH** - Model is very precise and trustworthy"
+    elif confidence_pct >= 85:
+        conf_text = "🟢 **VERY HIGH** - Model predictions are highly reliable"
+    elif confidence_pct >= 75:
+        conf_text = "🟡 **HIGH** - Model is reasonably confident, generally trustworthy"
+    elif confidence_pct >= 65:
+        conf_text = "🟡 **MODERATE** - Model has acceptable precision, use with caution"
+    elif confidence_pct >= 50:
+        conf_text = "🟠 **LOW** - Model predictions have high variability"
+    else:
+        conf_text = "🔴 **VERY LOW** - Model is not confident, unreliable predictions"
+    
+    st.markdown(f"**Confidence Assessment:** {conf_text}")
+    
+    st.markdown("---")
+    
+    # Detailed metrics
+    with st.expander("📊 Detailed Precision Metrics", expanded=True):
+        st.write(f"""
+        **Prediction Accuracy Metrics:**
+        - **Mean Absolute Error (MAE):** {mae:.6f}
+          - On average, predictions differ from actual by {mae*100:.2f}%
+        
+        - **Root Mean Squared Error (RMSE):** {rmse:.6f}
+          - Typical prediction deviation: {rmse*100:.2f}%
+        
+        - **R² Score:** {r_squared:.6f}
+          - Explains {r_squared*100:.2f}% of variance in target
+          - 1.0 = perfect fit, 0.0 = no correlation
+        
+        **Prediction Distribution:**
+        - **Prediction Std Dev:** {pred_std:.6f}
+          - Model confidence spread: {pred_std*100:.2f}%
+        
+        - **Actual Std Dev:** {actual_std:.6f}
+          - Actual data variability: {actual_std*100:.2f}%
+        
+        - **Distribution Match:** {abs(pred_std - actual_std):.6f}
+          - How well model captures data spread
+        
+        **Error Distribution:**
+        - **Mean Error:** {error_mean:.6f}
+        - **Error Std Dev:** {error_std:.6f}
+        - **Predictions within 1σ:** {within_1_std:.1f}%
+        - **Predictions within 2σ:** {within_2_std:.1f}%
+        
+        **Calibration:**
+        - **Calibration Error:** {calibration_error:.6f}
+          - Model mean vs actual mean difference
+          - Lower is better (shows how well model centers predictions)
+        """)
+    
+    # Performance insights
+    with st.expander("🔍 Performance Insights", expanded=True):
+        # Find best and worst predictions
+        best_idx = np.argmin(errors)
+        worst_idx = np.argmax(errors)
+        
+        st.write(f"""
+        **✅ Best Prediction:**
+        - Predicted: {predictions_flat[best_idx]:.4f}
+        - Actual: {Y_flat[best_idx]:.4f}
+        - Error: {errors[best_idx]:.6f} ({errors[best_idx]*100:.2f}%)
+        
+        **❌ Worst Prediction:**
+        - Predicted: {predictions_flat[worst_idx]:.4f}
+        - Actual: {Y_flat[worst_idx]:.4f}
+        - Error: {errors[worst_idx]:.6f} ({errors[worst_idx]*100:.2f}%)
+        
+        **Error Range:**
+        - Min Error: {np.min(errors):.6f}
+        - Max Error: {np.max(errors):.6f}
+        - Error Median: {np.median(errors):.6f}
+        """)
+        
+        # Bias analysis
+        mean_error_signed = np.mean(predictions_flat - Y_flat)
+        if abs(mean_error_signed) < 0.01:
+            bias_text = "✅ **NO BIAS** - Predictions are well-calibrated"
+        elif mean_error_signed > 0:
+            bias_text = f"📊 **OVERESTIMATION BIAS** - Tends to predict {mean_error_signed*100:.2f}% too high"
+        else:
+            bias_text = f"📊 **UNDERESTIMATION BIAS** - Tends to predict {abs(mean_error_signed)*100:.2f}% too low"
+        
+        st.write(f"**Bias Analysis:** {bias_text}")
+    
+    # Error history visualization
+    with st.expander("📉 Training Progress", expanded=True):
+        st.line_chart(model["errors"])
+        avg_error = np.mean(model["errors"])
+        st.write(f"Average training error: {avg_error:.6f}")
+    
+    # Prediction vs Actual scatter plot
+    with st.expander("📈 Prediction Accuracy Visualization", expanded=True):
+        import matplotlib.pyplot as plt
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        
+        # Scatter plot: Predicted vs Actual
+        ax1.scatter(Y_flat, predictions_flat, alpha=0.6, s=30)
+        min_val = min(Y_flat.min(), predictions_flat.min())
+        max_val = max(Y_flat.max(), predictions_flat.max())
+        ax1.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Perfect Fit')
+        ax1.set_xlabel('Actual Values')
+        ax1.set_ylabel('Predicted Values')
+        ax1.set_title('Predictions vs Actual')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Error distribution
+        ax2.hist(errors, bins=20, edgecolor='black', alpha=0.7)
+        ax2.axvline(error_mean, color='r', linestyle='--', linewidth=2, label=f'Mean Error: {error_mean:.4f}')
+        ax2.set_xlabel('Absolute Error')
+        ax2.set_ylabel('Frequency')
+        ax2.set_title('Error Distribution')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        st.pyplot(fig)
+    
+    st.markdown("---")
+    
+    # Neural Network Visualization
+    with st.expander("🧠 Neural Network Visualization & Activation Flow", expanded=True):
+        st.write("**Interactive visualization showing neuron activations and optimal signal path through the network.**")
+        
+        # Get a sample from training data for visualization
+        sample_idx = min(0, len(X) - 1)
+        x_sample = X[sample_idx]
+        pred_sample = predict(x_sample.reshape(1, -1), model)[0, 0]
+        
+        # Create and display the interactive network visualization
+        network_fig = visualize_network_interactive(
+            model, 
+            x_sample, 
+            pred_sample,
+            X.shape[1],  # num_features
+            model["W_hidden"].shape[1]  # hidden_neurons
+        )
+        st.plotly_chart(network_fig, use_container_width=True)
+        
+        st.markdown("""
+        **How to read this visualization:**
+        
+        - **🟠 Orange neurons (Input):** Input values. Size/color intensity = value magnitude
+        - **🔵 Blue neurons (Hidden):** Hidden layer neurons. Size/glow = activation strength
+        - **🟢 Green neuron (Output):** Final prediction. Size/brightness = confidence
+        - **⭐ Yellow path:** Strongest signal flow through the network (optimal path)
+        - **Gray lines:** Other connections, thickness = weight strength
+        - **Size of neurons:** Larger = stronger activation
+        - **Color intensity:** Brighter = stronger signal
+        """)
+    
+    # Animated activation visualization
+    with st.expander("🎬 Neuron Activation Animation (Multiple Samples)", expanded=False):
+        st.write("**Showing how different inputs flow through the network with glowing neurons.**")
+        
+        animation_fig = create_animated_training_neurons(model, X, Y)
+        st.pyplot(animation_fig)
+        
+        st.markdown("""
+        **Animation Details:**
+        - **Larger neurons** = Stronger activation
+        - **Brighter colors** = Higher activation values
+        - **Yellow lines** = Optimal path (strongest signal)
+        - **Gray lines** = Secondary connections
+        - Each panel shows one training sample flowing through the network
+        """)
+    
+    st.markdown("---")
+
+# =====================================================================
+# DATA LOADING INTERFACE
+# =====================================================================
 tab1, tab2 = st.tabs(["📊 Sample Data", "📤 Upload Data"])
 
 with tab1:
@@ -116,6 +631,7 @@ with tab1:
     use_sample = st.button("Use Sample Data", key="sample_btn")
     if use_sample:
         st.session_state["data"] = sample_data
+        st.success("Sample data loaded!")
 
 with tab2:
     uploaded_file = st.file_uploader("Upload CSV dataset", type=["csv"])
@@ -125,12 +641,18 @@ with tab2:
         use_upload = st.button("Use Uploaded Data", key="upload_btn")
         if use_upload:
             st.session_state["data"] = df
+            st.success("Data uploaded and loaded!")
 
 # Process the selected data
 if "data" in st.session_state:
     df = st.session_state["data"]
-    st.subheader("📊 Dataset Preview")
+    bot = st.session_state["interpreter_bot"]
+    
+    st.markdown("## 📊 Loaded Dataset")
     st.dataframe(df.head())
+    
+    # Generate dataset assessment
+    generate_dataset_assessment(df, bot)
 
     X = df.iloc[:, :-1].values.astype(np.float32)
     Y = df.iloc[:, -1].values.astype(np.float32).reshape(-1, 1)
@@ -140,31 +662,110 @@ if "data" in st.session_state:
     epochs = st.sidebar.slider("Epochs", 10, 2000, 500)
     hidden_neurons = st.sidebar.slider("Hidden Neurons", 1, 50, 10)
 
-    if st.button("🚀 Train Model"):
-        model = train_network(X, Y, lr, epochs, hidden_neurons)
-        st.session_state["model"] = model
-        st.session_state["num_features"] = X.shape[1]
+    if st.button("🚀 Train Model", key="train_btn"):
+        with st.spinner("Training neural network..."):
+            model = train_network(X, Y, lr, epochs, hidden_neurons)
+            st.session_state["model"] = model
+            st.session_state["num_features"] = X.shape[1]
 
         st.success("✨ Training complete!")
+        
+        # Generate training assessment
+        generate_training_assessment(model, X, Y, bot)
 
-        st.subheader("📉 Training Error")
-        st.line_chart(model["errors"])
-
-        st.subheader("🔍 Final Neuron Activations (last sample)")
-        st.json(model["activations"][-1])
-
-# -----------------------------
-# Prediction
-# -----------------------------
+# Prediction with Interpretation
 if "model" in st.session_state:
-    st.subheader("🔮 Predict New Input")
+    st.markdown("---")
+    st.markdown("## 🔮 Make New Predictions")
 
     inputs = []
     for i in range(st.session_state["num_features"]):
-        val = st.number_input(f"Input {i+1}", value=0.0)
+        val = st.number_input(f"Feature {i+1}", value=0.0)
         inputs.append(val)
 
-    if st.button("Predict"):
+    if st.button("🚀 Get Prediction", key="predict_btn"):
         x = np.array(inputs).reshape(1, -1)
         pred = predict(x, st.session_state["model"])
-        st.metric("Prediction", float(pred[0, 0]))
+        pred_value = float(pred[0, 0])
+        st.session_state["last_prediction"] = pred_value
+        
+        bot = st.session_state["interpreter_bot"]
+        
+        # Show prediction value
+        st.markdown("---")
+        st.markdown("### 🎯 Prediction Result")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Raw Prediction", f"{pred_value:.4f}")
+        with col2:
+            st.metric("Percentage", f"{pred_value*100:.1f}%")
+        with col3:
+            # Prediction confidence based on distance from 0.5
+            distance_from_boundary = min(abs(pred_value - 0.5), 0.5)
+            pred_confidence = (distance_from_boundary * 2) * 100  # 0-100%
+            st.metric("Prediction Confidence", f"{pred_confidence:.1f}%")
+        
+        # Interpret prediction
+        with st.expander("📖 What This Prediction Means", expanded=True):
+            insight = bot.interpret_prediction(pred_value, context="neural network output")
+            st.markdown(insight.user_friendly_description)
+            
+            with st.expander("📊 Probability Details"):
+                st.write(insight.probability_explanation)
+            
+            with st.expander("💡 Recommendations"):
+                for rec in insight.recommendations:
+                    st.write(f"• {rec}")
+            
+            with st.expander("📈 Trend"):
+                st.write(insight.trend_analysis)
+        
+        # Real confidence explanation
+        with st.expander("🎯 Real Confidence Explained", expanded=True):
+            st.write(f"""
+            **Prediction Confidence: {pred_confidence:.1f}%**
+            
+            This measures how **far the prediction is from the uncertainty boundary** (0.5).
+            
+            - **0%** = Completely uncertain (prediction = 0.5)
+            - **100%** = Maximum certainty (prediction = 0.0 or 1.0)
+            
+            **For this prediction:**
+            - Value: {pred_value:.4f}
+            - Distance from 0.5: {abs(pred_value - 0.5):.4f}
+            - Confidence: {pred_confidence:.1f}%
+            
+            The higher this percentage, the more **decisive** the model is about its prediction.
+            """)
+        
+        # Network visualization for this specific prediction
+        with st.expander("🧠 Network Flow for This Prediction", expanded=False):
+            st.write("**Showing how your input flowed through the neural network to produce this prediction.**")
+            
+            pred_network_fig = visualize_network_interactive(
+                st.session_state["model"],
+                np.array(inputs),
+                pred_value,
+                st.session_state["num_features"],
+                st.session_state["model"]["W_hidden"].shape[1]
+            )
+            st.plotly_chart(pred_network_fig, use_container_width=True)
+            
+            st.markdown("""
+            **Reading the network visualization:**
+            
+            - **Left (Input Layer):** Your input values. Larger/brighter = higher values
+            - **Middle (Hidden Layer):** Internal neurons processing the input. Size/glow shows activation strength
+            - **Right (Output):** Final prediction. The glow intensity represents prediction strength
+            - **⭐ Yellow Path:** The strongest signal path - where the most important processing happened
+            - **Gray Lines:** Other connections with weaker influence on the output
+            
+            **What's happening:**
+            1. Your inputs flow into the input layer
+            2. Each input connects to hidden neurons with different weights
+            3. Hidden neurons activate based on weighted inputs
+            4. The strongest activations flow to the output
+            5. The yellow highlighted path shows the route with the most influence
+            """)
+
+
