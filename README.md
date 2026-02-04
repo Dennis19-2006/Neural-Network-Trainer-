@@ -6,6 +6,9 @@ A **from-scratch single-layer neural network** with backpropagation, visualized 
 
 Perfect for learning how neural networks really work under the hood — no PyTorch, no TensorFlow, just NumPy + Streamlit.
 
+##steamlit app link:
+https://neural-network-trainer-123938.streamlit.app/
+
 ## Features
 
 - Train a neural network from scratch using only NumPy
