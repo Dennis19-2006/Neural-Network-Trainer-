@@ -2,8 +2,6 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import time
-import matplotlib.pyplot as plt
-from matplotlib.patches import Circle
 from interpreter_bot import InterpreterBot, create_interpreter_bot
 
 # -----------------------------
@@ -114,93 +112,6 @@ except:
 # Initialize interpreter bot
 if "interpreter_bot" not in st.session_state:
     st.session_state["interpreter_bot"] = create_interpreter_bot()
-
-def create_animated_training_neurons(model, X, Y):
-    """Create animation showing neuron activations during prediction"""
-    
-    # Get a few sample predictions to animate
-    num_samples = min(5, len(X))
-    
-    fig, axes = plt.subplots(1, num_samples, figsize=(15, 4))
-    if num_samples == 1:
-        axes = [axes]
-    
-    for sample_idx in range(num_samples):
-        x = X[sample_idx:sample_idx+1]
-        
-        # Forward pass
-        Z_hidden = np.dot(x, model["W_hidden"]) + model["B_hidden"]
-        A_hidden = sigmoid(Z_hidden)[0]
-        Z_output = np.dot(A_hidden.reshape(1, -1), model["W_output"]) + model["B_output"]
-        A_output = sigmoid(Z_output)[0, 0]
-        
-        ax = axes[sample_idx]
-        
-        # Create simple visualization
-        num_inputs = x.shape[1]
-        num_hidden = len(A_hidden)
-        
-        y_pos_input = np.linspace(0.8, 0.2, num_inputs)
-        y_pos_hidden = np.linspace(0.8, 0.2, num_hidden)
-        
-        # Plot input neurons
-        for i, val in enumerate(x[0]):
-            color_val = min(abs(val), 1)
-            ax.scatter(0.1, y_pos_input[i], s=500, c=[[color_val, 0.5, 1-color_val]], 
-                      edgecolors='black', linewidth=2, zorder=3)
-            ax.text(0.05, y_pos_input[i], f"{val:.2f}", ha='right', va='center', fontsize=8)
-        
-        # Plot hidden neurons with glow effect
-        max_hidden = np.max(A_hidden) if len(A_hidden) > 0 else 1
-        for i, activation in enumerate(A_hidden):
-            # Glow effect
-            glow_alpha = activation * 0.3
-            circle = Circle((0.5, y_pos_hidden[i]), 0.08, 
-                           color=(activation, 0.3, 1-activation), alpha=glow_alpha, zorder=1)
-            ax.add_patch(circle)
-            
-            # Main neuron
-            ax.scatter(0.5, y_pos_hidden[i], s=400, 
-                      c=[[activation, 0.3, 1-activation]], 
-                      edgecolors='black', linewidth=2, zorder=3)
-            ax.text(0.5, y_pos_hidden[i], f"{activation:.2f}", 
-                   ha='center', va='center', fontsize=7, color='white', weight='bold')
-        
-        # Plot output neuron
-        ax.scatter(0.9, 0.5, s=600, c=[[A_output, 0.7, 1-A_output]], 
-                  edgecolors='gold', linewidth=3, zorder=3)
-        ax.text(0.95, 0.5, f"{A_output:.3f}", ha='left', va='center', fontsize=9, weight='bold')
-        
-        # Draw connections (optimal path stronger)
-        for i in range(num_inputs):
-            for j in range(num_hidden):
-                weight = model["W_hidden"][i, j]
-                alpha = min(abs(weight) * 0.5, 0.5)
-                ax.plot([0.15, 0.45], [y_pos_input[i], y_pos_hidden[j]], 
-                       'gray', alpha=alpha, linewidth=1, zorder=0)
-        
-        # Highlight optimal path
-        max_input_idx = np.argmax(np.abs(x[0]))
-        max_hidden_idx = np.argmax(A_hidden)
-        
-        ax.plot([0.15, 0.45], [y_pos_input[max_input_idx], y_pos_hidden[max_hidden_idx]], 
-               'yellow', linewidth=3, zorder=2)
-        ax.plot([0.55, 0.85], [y_pos_hidden[max_hidden_idx], 0.5], 
-               'yellow', linewidth=3, zorder=2)
-        
-        for j in range(num_hidden):
-            ax.plot([0.55, 0.85], [y_pos_hidden[j], 0.5], 
-                   'lightgray', alpha=0.2, linewidth=1, zorder=0)
-        
-        ax.set_xlim(-0.05, 1.0)
-        ax.set_ylim(0.1, 0.9)
-        ax.set_aspect('equal')
-        ax.axis('off')
-        ax.set_title(f"Sample {sample_idx+1}\nActual: {Y[sample_idx, 0]:.3f}", 
-                    fontsize=10, weight='bold')
-    
-    plt.tight_layout()
-    return fig
 
 # =====================================================================
 # HELPER FUNCTION: Generate Full Dataset Assessment
@@ -390,31 +301,34 @@ def generate_training_assessment(model, X, Y, bot):
     
     # Prediction vs Actual scatter plot
     with st.expander("📈 Prediction Accuracy Visualization", expanded=True):
-        import matplotlib.pyplot as plt
-        
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-        
-        # Scatter plot: Predicted vs Actual
-        ax1.scatter(Y_flat, predictions_flat, alpha=0.6, s=30)
-        min_val = min(Y_flat.min(), predictions_flat.min())
-        max_val = max(Y_flat.max(), predictions_flat.max())
-        ax1.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Perfect Fit')
-        ax1.set_xlabel('Actual Values')
-        ax1.set_ylabel('Predicted Values')
-        ax1.set_title('Predictions vs Actual')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # Error distribution
-        ax2.hist(errors, bins=20, edgecolor='black', alpha=0.7)
-        ax2.axvline(error_mean, color='r', linestyle='--', linewidth=2, label=f'Mean Error: {error_mean:.4f}')
-        ax2.set_xlabel('Absolute Error')
-        ax2.set_ylabel('Frequency')
-        ax2.set_title('Error Distribution')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3, axis='y')
-        
-        st.pyplot(fig)
+        try:
+            import matplotlib.pyplot as plt
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            
+            # Scatter plot: Predicted vs Actual
+            ax1.scatter(Y_flat, predictions_flat, alpha=0.6, s=30)
+            min_val = min(Y_flat.min(), predictions_flat.min())
+            max_val = max(Y_flat.max(), predictions_flat.max())
+            ax1.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Perfect Fit')
+            ax1.set_xlabel('Actual Values')
+            ax1.set_ylabel('Predicted Values')
+            ax1.set_title('Predictions vs Actual')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Error distribution
+            ax2.hist(errors, bins=20, edgecolor='black', alpha=0.7)
+            ax2.axvline(error_mean, color='r', linestyle='--', linewidth=2, label=f'Mean Error: {error_mean:.4f}')
+            ax2.set_xlabel('Absolute Error')
+            ax2.set_ylabel('Frequency')
+            ax2.set_title('Error Distribution')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3, axis='y')
+            
+            st.pyplot(fig)
+            plt.close(fig)
+        except Exception as e:
+            st.warning(f"Could not display visualization: {str(e)}")
     
     st.markdown("---")
 
@@ -535,6 +449,8 @@ if "model" in st.session_state:
             
             The higher this percentage, the more **decisive** the model is about its prediction.
             """)
+
+
 
 
 
