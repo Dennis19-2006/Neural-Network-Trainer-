@@ -1,39 +1,16 @@
-# Neural-Network-Trainer-
+# Neural networks UI
 
-# Neural Network Trainer with Streamlit
+Streamlit app to train a small neural network.
 
-A **from-scratch single-layer neural network** with backpropagation, visualized and interactively trained using **Streamlit**.
+How to run locally:
 
-Perfect for learning how neural networks really work under the hood — no PyTorch, no TensorFlow, just NumPy + Streamlit.
+```powershell
+python -m pip install -r requirements.txt
+streamlit run ml.py
+```
 
-##steamlit app link:
-https://neural-network-trainer-123938.streamlit.app/
+Deploy to Streamlit Community Cloud:
 
-## Features
-
-- Train a neural network from scratch using only NumPy
-- Sigmoid activation + mean squared error
-- Interactive Streamlit interface
-- Real-time training progress bar & error curve
-- Upload your own CSV dataset or use built-in sample data
-- Make predictions on new inputs after training
-- Visualizes final layer activations (JSON view)
-- Simple gradient clipping to prevent explosions 
-
-## Quick Start
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/Dennis19-2006/neural-network-trainer-streamlit.git
-cd neural-network-trainer-streamlit
-
-# 2. Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate    # Linux / macOS
-venv\Scripts\activate       # Windows
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Run the app
-streamlit run app.py
+1. Create a GitHub repository and push this project.
+2. On https://streamlit.io/cloud, click "New app" and connect your GitHub repo.
+3. Select the repository and branch, set the main file to `ml.py`, and deploy.
